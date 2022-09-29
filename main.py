@@ -5,6 +5,7 @@ from tabulate import tabulate
 
 import os
 import csv
+import time
 
 class Task1:
 
@@ -23,7 +24,7 @@ class Task1:
             id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
             user_id VARCHAR(30) NOT NULL,
             transportation_mode VARCHAR(30),
-            start_date_time DATETIME  NOT NULL,
+            start_date_time DATETIME NOT NULL,
             end_date_time DATETIME NOT NULL,
             FOREIGN KEY (user_id)
                 REFERENCES User(id))
@@ -71,17 +72,17 @@ class Task1:
             for row in reader:
                 labeled_users.append(row[0])
         users = [f.path.split('\\')[2] for f in os.scandir(dataset_path + '\\data') if f.is_dir()]
+        activity_counter = 1
+        total_time = 0
         for user in users:
             # Insert user
-            print('Current user = ', user)
-            query_insert_user = """INSERT INTO User (id, has_labels)
-                                VALUES ({}, {})"""
+            start = time.perf_counter()
+            print('Current user = ', user, end = '')
+            query_insert_user = """INSERT INTO User (id, has_labels) VALUES ({}, {})"""
             if labeled_users.count(user) > 0:
-                query_insert_user = query_insert_user.format(user, 'TRUE')
+                self.cursor.execute(query_insert_user.format(user, 'TRUE'))
             else:
-                query_insert_user = query_insert_user.format(user, 'FALSE')
-            print(query_insert_user)
-            self.cursor.execute(query_insert_user)
+                self.cursor.execute(query_insert_user.format(user, 'FALSE'))
             # Read labels file
             labels = []
             if labeled_users.count(user) > 0:
@@ -110,26 +111,37 @@ class Task1:
                     
                     # Insert activity and trackpoints into DB
                     # Formato DATETIME: YY5YY-MM-DD hh:mm:ss
-                    query_insert_activity = """INSERT INTO Activity (id, user_id, transportation_mode, start_date_time, end_date_time)
-                                            VALUES ({}, {}, {}, {})"""
-                    start_date_time = (trackpoints[0][5] + ' ' + trackpoints[0][6]).replace('-', '/')
-                    end_date_time = (trackpoints[len(trackpoints)-1][5] + ' ' + trackpoints[len(trackpoints)-1][6]).replace('-', '/')
+                    # Get activity attributes (including transportation mode)
+                    query_insert_activity = """INSERT INTO Activity (id, user_id, transportation_mode, start_date_time, end_date_time) VALUES ({}, {}, {}, {}, {})"""
+                    start_date_time = ('\'' + trackpoints[0][5] + ' ' + trackpoints[0][6] + '\'').replace('/', '-')
+                    end_date_time = ('\'' + trackpoints[len(trackpoints)-1][5] + ' ' + trackpoints[len(trackpoints)-1][6] + '\'').replace('/', '-')
                     transportation_mode = 'NULL'
                     for label in labels:
                         if start_date_time == label[0] and end_date_time == label[1]:
                             transportation_mode = label[2]
-                    query_insert_activity = query_insert_user.format(user, transportation_mode, start_date_time, end_date_time)
-                    self.cursor.execute(query_insert_activity)
+                    # Insert activity
+                    self.cursor.execute(query_insert_activity.format(0, user, transportation_mode, start_date_time, end_date_time))
+                    query_insert_trackpoint = """INSERT INTO TrackPoint (id, activity_id, lat, lon, altitude, date_time) VALUES """
+                    trackpoint_values = """({}, {}, {}, {}, {}, {}), """
+                    for trackpoint in trackpoints:
+                        date_time = ('\'' + trackpoint[5] + ' ' + trackpoint[6] + '\'').replace('/', '-')
+                        query_insert_trackpoint = query_insert_trackpoint + trackpoint_values.format(0, activity_counter, trackpoint[0], trackpoint[1], trackpoint[3], date_time)
+                    query_insert_trackpoint = query_insert_trackpoint[:-2] + ';'
+                    self.cursor.execute(query_insert_trackpoint)
+                    activity_counter += 1
             self.db_connection.commit()
-            return
+            stop = time.perf_counter()
+            print(" || User inserted in {:.2f} seconds".format(stop-start))
+            total_time += stop - start
+        print('Data inserted in {:.2f} seconds'.format(total_time))
 
 
 def main():
     try:
         program = Task1()                           # Initialize database connection
-        program.delete_tables()
-        program.create_tables()                     # Create database tables if they don't exist
-        program.insert_data('dataset')              # Parse dataset and insert data into tables
+        #program.delete_tables()
+        #program.create_tables()                     # Create database tables if they don't exist
+        #program.insert_data('dataset')              # Parse dataset and insert data into tables
     except Exception as e:
         print("ERROR: Failed to use database:", e)
     finally:
