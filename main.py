@@ -113,14 +113,14 @@ class Task1:
                     # Formato DATETIME: YY5YY-MM-DD hh:mm:ss
                     # Get activity attributes (including transportation mode)
                     query_insert_activity = """INSERT INTO Activity (id, user_id, transportation_mode, start_date_time, end_date_time) VALUES ({}, {}, {}, {}, {})"""
-                    start_date_time = ('\'' + trackpoints[0][5] + ' ' + trackpoints[0][6] + '\'').replace('/', '-')
-                    end_date_time = ('\'' + trackpoints[len(trackpoints)-1][5] + ' ' + trackpoints[len(trackpoints)-1][6] + '\'').replace('/', '-')
+                    start_date_time = (trackpoints[0][5] + ' ' + trackpoints[0][6]).replace('/', '-')
+                    end_date_time = (trackpoints[len(trackpoints)-1][5] + ' ' + trackpoints[len(trackpoints)-1][6]).replace('/', '-')
                     transportation_mode = 'NULL'
                     for label in labels:
-                        if start_date_time == label[0] and end_date_time == label[1]:
-                            transportation_mode = label[2]
+                        if start_date_time == label[0].replace('/', '-') and end_date_time == label[1].replace('/', '-'):
+                            transportation_mode = '\'' + label[2] + '\'' 
                     # Insert activity
-                    self.cursor.execute(query_insert_activity.format(0, user, transportation_mode, start_date_time, end_date_time))
+                    self.cursor.execute(query_insert_activity.format(0, user, transportation_mode, '\'' + start_date_time + '\'' , '\'' + end_date_time + '\''))
                     query_insert_trackpoint = """INSERT INTO TrackPoint (id, activity_id, lat, lon, altitude, date_time) VALUES """
                     trackpoint_values = """({}, {}, {}, {}, {}, {}), """
                     for trackpoint in trackpoints:
@@ -133,15 +133,15 @@ class Task1:
             stop = time.perf_counter()
             print(" || User inserted in {:.2f} seconds".format(stop-start))
             total_time += stop - start
-        print('Data inserted in {:.2f} seconds'.format(total_time))
+        print('Data inserted in {:0.0f} minutes and seconds {:0.0f}'.format(total_time/60, total_time%60))
 
 
 def main():
     try:
         program = Task1()                           # Initialize database connection
-        #program.delete_tables()
-        #program.create_tables()                     # Create database tables if they don't exist
-        #program.insert_data('dataset')              # Parse dataset and insert data into tables
+        program.delete_tables()
+        program.create_tables()                     # Create database tables if they don't exist
+        program.insert_data('dataset')              # Parse dataset and insert data into tables
     except Exception as e:
         print("ERROR: Failed to use database:", e)
     finally:
