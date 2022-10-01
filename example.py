@@ -49,6 +49,7 @@ class ExampleProgram:
         print(tabulate(rows, headers=self.cursor.column_names))
 
 
+
 def main():
     program = None
     try:
