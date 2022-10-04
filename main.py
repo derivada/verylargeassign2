@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from pickle import TRUE
+
+from haversine import haversine
+
 from DbConnector import DbConnector
 from tabulate import tabulate
 
@@ -102,7 +105,7 @@ class Connection:
                     if(line_count > 2506): continue # File too large -> Next activity
                     
                     # Insert activity and trackpoints into DB
-                    # Formato DATETIME: YY5YY-MM-DD hh:mm:ss
+                    # Format DATETIME: YY5YY-MM-DD hh:mm:ss
                     # Get activity attributes (including transportation mode)
                     query_insert_activity = """INSERT INTO Activity (id, user_id, transportation_mode, start_date_time, end_date_time) VALUES ({}, {}, {}, {}, {})"""
                     start_date_time = (trackpoints[0][5] + ' ' + trackpoints[0][6]).replace('/', '-')
@@ -139,19 +142,39 @@ class Connection:
             print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
         else:
             print('\n{} rows in set ({:.2f} sec)\n'.format(len(rows), stop - start))
-    
+
+    def query_1(self):
+        # 1: How many users, activities and trackpoints are there in the dataset (after it is inserted into the database).
+        query = "SELECT COUNT(id) as 'Total Users' FROM User;"
+        query2 = "SELECT COUNT(id) as 'Total Activities' FROM Activity;"
+        query3 = "SELECT COUNT(id) as 'Total Trackpoints' FROM TrackPoint;"
+        self.execute_and_print(query, "Query 1 - How many users are there in the dataset (after it is inserted into the database):")
+        self.execute_and_print(query2, "Query 1 - How many activities are there in the dataset (after it is inserted into the database):")
+        self.execute_and_print(query3, "Query 1 - How many trackpoints are there in the dataset (after it is inserted into the database):")
+
     def query_2(self):
         # 2: Find the average number of activities per user.
         # We perform a subquery to get a table with the number of activities grouped by user, 
         # then we aggregate the count column and perform an average
         query = "SELECT AVG(count) as Average FROM (SELECT user_id, COUNT(id) as count FROM Activity GROUP BY user_id) AS count_act;"
         self.execute_and_print(query, "Query 2 - Find the average number of activities per user:")
+
+    def query_3(self):
+        # 3: Find the top 20 users with the highest number of activities.
+        query = "SELECT user_id, COUNT(id) as 'Activities per User' FROM Activity GROUP BY user_id ORDER BY COUNT(id) DESC LIMIT 20;"
+        self.execute_and_print(query, "Query 3 - Find the top 20 users with the highest number of activities:")
     
     def query_4(self):
         # 4: Find all users who have taken a taxi.
         # We find all activites where a taxi was used and then count the distinct user IDs found on those activies
         query = "SELECT COUNT(DISTINCT(user_id)) as 'Taxi Users' FROM Activity WHERE transportation_mode = 'taxi';"
         self.execute_and_print(query, "Query 4 - Find all users who have taken a taxi:")
+
+    def query_5(self):
+        # 5: Find all types of transportation modes and count how many activities that are tagged with these transportation mode labels. Do not count the rows where the mode is null.
+        query = "SELECT transportation_mode, COUNT(id) as count FROM (SELECT * FROM Activity WHERE transportation_mode IS NOT NULL) as t1 GROUP BY transportation_mode"
+        self.execute_and_print(query, "Query 5 - Find all types of transportation modes and count how many activities that are tagged with these transportation mode labels. Do not count the rows where the mode is null:")
+
     def query_6(self):
         # 6:
         #   a) Find the year with the most activities.
@@ -169,7 +192,22 @@ class Connection:
         query = "SELECT Year(start_date_time) as Year, SUM(TIMESTAMPDIFF(HOUR, start_date_time, end_date_time)) as 'Total Hours' from Activity GROUP BY Year ORDER BY 'Total Hours' DESC LIMIT 1;"
         self.execute_and_print(query, "Query 6 - b) Is this also the year with most recorded hours?:")
         print('As we see, 2008 with the most activities, but 2009 has more hours recorded\n')
-    
+
+    def query_7(self):
+        # 7: Find the total distance (in km) walked in 2008, by user with id=112.
+        # Hay que pasarlo a KM
+        query = "SELECT lat, lon FROM TrackPoint as tp JOIN Activity as act WHERE tp.activity_id = act.id AND act.user_id = 112 AND YEAR(start_date_time) = 2008"
+        start = time.perf_counter()
+        self.cursor.execute(query)
+        dist = 0
+        last = None
+        for (lat, lon) in self.cursor:
+            if last is not None:
+                dist += haversine((lat, lon), last, unit='km')
+            last = (lat, lon)
+        stop = time.perf_counter()
+        print("Query 7 - Find the total distance (in km) walked in 2008, by user with id=112: {:.3f} km\n".format(dist))
+
     def query_8(self):
         # 8: Find the top 20 users who have gained the most altitude meters.
         #   - Output should be a table with (id, total meters gained per user)
@@ -214,6 +252,47 @@ class Connection:
         else:
             print('\n{} rows in set ({:.2f} sec)\n'.format(len(rows), stop - start))
 
+    def query_9(self):
+        # 9: Find all users who have invalid activities,and the number of invalid activities per user
+        # An invalid activity is defined as an activity with consecutive trackpoints where the timestamps deviate with at least 5 minutes.
+        query = "SELECT act.id as act_id, act.user_id as user_id, tp.date_time as timestamp FROM TrackPoint as tp JOIN Activity as act WHERE tp.activity_id = act.id"
+        start = time.perf_counter()
+        self.cursor.execute(query)
+        (last_ts, last_act) = (None, None) # Last trackpoint and activity
+        users_with_invalid_acts = {} # Dictionary user_id -> # of invalid acts.
+        last_invalid_act = None # Last invalid activity
+
+        for (act_id, user_id, timestamp) in self.cursor:
+            # We skip the first trackpoint and activities that have been already marked as invalid
+            # We also skip when we change activities to avoid, can't compute time diff between them
+            if act_id != last_invalid_act and last_ts != None and act_id == last_act:
+                diff = (timestamp - last_ts).total_seconds() # Difference in seconds
+                if diff >= 300.0:
+                    if user_id in users_with_invalid_acts:
+                        users_with_invalid_acts[user_id] += 1
+                    else:
+                        users_with_invalid_acts[user_id] = 1
+                    last_invalid_act = act_id # Mark as invalid
+            (last_ts, last_act) = (timestamp, act_id)
+        stop = time.perf_counter()
+
+        # Arrange as table
+        rows = []
+        total = 0
+        for entry in users_with_invalid_acts:
+            row = []
+            row.append(entry)
+            row.append(users_with_invalid_acts[entry])
+            rows.append(row)
+            total += users_with_invalid_acts[entry]
+        print(total)
+        print("Query 9 - Find all users who have invalid activities, and the number of invalid activities per user:\n")
+        print(tabulate(rows, headers=["User", "Number of invalid activities"], tablefmt = "pretty"))
+        if len(rows) == 1:
+            print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
+        else:
+            print('\n{} rows in set ({:.2f} sec)\n'.format(len(rows), stop - start))
+
     def query_10(self):
         # 10: Find the users who have tracked an activity in the Forbidden City of Beijing.
         #   - In this question you can consider the Forbidden City to have
@@ -227,6 +306,38 @@ class Connection:
            WHERE tp.activity_id = act.id AND tp.lat BETWEEN 39.915 AND 39.917 AND tp.lon BETWEEN 116.396 AND 116.398"""
         self.execute_and_print(query, "Query 10 - Find users who have tracked an activity in the Forbidden City of Beijing:")
 
+    def query_11(self):
+        # 11: Find all users who have registered transportation_mode and their most used transportation_mode.
+        #   - The answer should be on format (user_id, most_used_transportation_mode) sorted on user_id.
+        #   - Some users may have the same number of activities tagged with e.g. walk and car. In this case it is up to you to decide which transportation mode to include in your answer (choose one).
+        #   - Do not count the rows where the mode is null.
+        query = "SELECT user_id, transportation_mode, COUNT(*) as tcount FROM (SELECT * FROM Activity WHERE transportation_mode IS NOT NULL) as t1 GROUP BY user_id, transportation_mode"
+        start = time.perf_counter()
+        self.cursor.execute(query)
+        best_trans_modes = {}  # Dictionary user_id -> name of most used transportation mode.
+        most_used_trans = {}  # Dictionary user_id -> # of activities with most used transportation mode
+
+        for (user_id, transportation_mode, tcount) in self.cursor:
+            if user_id not in best_trans_modes or most_used_trans[user_id] < tcount:
+                best_trans_modes[user_id] = transportation_mode
+                most_used_trans[user_id] = tcount
+
+        stop = time.perf_counter()
+        # Arrange as table
+        rows = []
+        for entry in best_trans_modes:
+            row = []
+            row.append(entry)
+            row.append(best_trans_modes[entry])
+            rows.append(row)
+        print(
+            "Query 11 - Find all users who have registered transportation_mode and their most used transportation_mode:\n")
+        print(tabulate(rows, headers=["User", "Most used transportation mode"], tablefmt="pretty"))
+        if len(rows) == 1:
+            print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
+        else:
+            print('\n{} rows in set ({:.2f} sec)\n'.format(len(rows), stop - start))
+
 
 
 
@@ -239,11 +350,18 @@ def main():
         #program.create_tables()                     # Create database tables if they don't exist
         #program.insert_data('dataset')              # Parse dataset and insert data into tables
         # Execute the queries
+        program.query_1()
         program.query_2()
+        program.query_3()
         program.query_4()
+        program.query_5()
         program.query_6()
+        program.query_7()
         program.query_8()
+        program.query_9()
         program.query_10()
+        program.query_11()
+
 
     except Exception as e:
         print("ERROR: Failed to use database:", e)
