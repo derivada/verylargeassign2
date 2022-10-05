@@ -145,7 +145,7 @@ class Connection:
         stop = time.perf_counter()
         rows = self.cursor.fetchall()
         print(message + '\n')
-        print(tabulate(rows, headers=self.cursor.column_names, tablefmt = "pretty"))
+        print(tabulate(rows, headers=self.cursor.column_names, tablefmt = "simple"))
         if len(rows) == 1:
             print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
         else:
@@ -255,7 +255,7 @@ class Connection:
             top += 1
             if(top > 20): break
         print("Query 8 - Find the top 20 users who have gained the most altitude meters:\n")
-        print(tabulate(rows, headers=["Top", "User ID", "Altitude gained"], tablefmt = "pretty"))
+        print(tabulate(rows, headers=["Top", "User ID", "Altitude gained"], tablefmt = "simple"))
         if len(rows) == 1:
             print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
         else:
@@ -296,7 +296,7 @@ class Connection:
             total += users_with_invalid_acts[entry]
         print(total)
         print("Query 9 - Find all users who have invalid activities, and the number of invalid activities per user:\n")
-        print(tabulate(rows, headers=["User", "Number of invalid activities"], tablefmt = "pretty"))
+        print(tabulate(rows, headers=["User", "Number of invalid activities"], tablefmt = "simple"))
         if len(rows) == 1:
             print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
         else:
@@ -359,17 +359,17 @@ def main():
         #program.create_tables()                     # Create database tables if they don't exist
         #program.insert_data('dataset')              # Parse dataset and insert data into tables
         # Execute the queries
-        # program.query_1()
-        # program.query_2()
-        # program.query_3()
-        # program.query_4()
-        # program.query_5()
-        # program.query_6()
-        # program.query_7()
+        program.query_1()
+        program.query_2()
+        program.query_3()
+        program.query_4()
+        program.query_5()
+        program.query_6()
+        program.query_7()
         program.query_8()
-        # program.query_9()
-        # program.query_10()
-        # program.query_11()
+        program.query_9()
+        program.query_10()
+        program.query_11()
 
 
     except Exception as e:
