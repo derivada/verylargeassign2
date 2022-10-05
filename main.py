@@ -66,11 +66,15 @@ class Connection:
             reader = csv.reader(csvfile, delimiter = '\t', quotechar = '|')
             for row in reader:
                 labeled_users.append(row[0])
+        
+        # Ger user names mapping the path to user folder string
         users = [f.path.split('\\')[2] for f in os.scandir(dataset_path + '\\data') if f.is_dir()]
+
         activity_counter = 1
         total_time = 0
+        # Main user and activity loop
         for user in users:
-            # Insert user
+            # Insert user into DB
             start = time.perf_counter()
             print('Current user = ', user, end = '')
             query_insert_user = """INSERT INTO User (id, has_labels) VALUES ({}, {})"""
@@ -78,7 +82,8 @@ class Connection:
                 self.cursor.execute(query_insert_user.format(user, 'TRUE'))
             else:
                 self.cursor.execute(query_insert_user.format(user, 'FALSE'))
-            # Read labels file
+
+            # Read labels file if we got a labeled user
             labels = []
             if labeled_users.count(user) > 0:
                 with open(dataset_path + '\\data\\{}\\labels.txt'.format(user), newline='') as csvfile:
@@ -89,28 +94,30 @@ class Connection:
                         if line_count == 1: continue
                         labels.append(row)
             
-            # Activity files
+            # Loop trough his activities
             for file in os.scandir(dataset_path + '\\data\\{}\\Trajectory'.format(user)):
                 trackpoints = []
+                # Open activity file and parse as csv
                 with open(file.path, newline='') as csvfile:
                     reader = csv.reader(csvfile, delimiter=',', quotechar='|')
                     line_count = 0
-                    # Read lines
+                    # Read TrackPoint lines
                     for row in reader:
                         line_count += 1
-                        if(line_count <= 6): continue # Header
+                        if(line_count <= 6): continue # Skip header
                         elif(line_count > 2506): break # File too large
                         trackpoints.append(row)
                     
                     if(line_count > 2506): continue # File too large -> Next activity
                     
                     # Insert activity and trackpoints into DB
-                    # Format DATETIME: YY5YY-MM-DD hh:mm:ss
+                    # Format DATETIME: YYYY-MM-DD hh:mm:ss
                     # Get activity attributes (including transportation mode)
                     query_insert_activity = """INSERT INTO Activity (id, user_id, transportation_mode, start_date_time, end_date_time) VALUES ({}, {}, {}, {}, {})"""
                     start_date_time = (trackpoints[0][5] + ' ' + trackpoints[0][6]).replace('/', '-')
                     end_date_time = (trackpoints[len(trackpoints)-1][5] + ' ' + trackpoints[len(trackpoints)-1][6]).replace('/', '-')
                     transportation_mode = 'NULL'
+                    # Find transportation mode label by matching starting and ending time
                     for label in labels:
                         if start_date_time == label[0].replace('/', '-') and end_date_time == label[1].replace('/', '-'):
                             transportation_mode = '\'' + label[2] + '\'' 
@@ -118,6 +125,7 @@ class Connection:
                     self.cursor.execute(query_insert_activity.format(0, user, transportation_mode, '\'' + start_date_time + '\'' , '\'' + end_date_time + '\''))
                     query_insert_trackpoint = """INSERT INTO TrackPoint (id, activity_id, lat, lon, altitude, date_time) VALUES """
                     trackpoint_values = """({}, {}, {}, {}, {}, {}), """
+                    # Insert trackpoints as a batched insert
                     for trackpoint in trackpoints:
                         date_time = ('\'' + trackpoint[5] + ' ' + trackpoint[6] + '\'').replace('/', '-')
                         query_insert_trackpoint = query_insert_trackpoint + trackpoint_values.format(0, activity_counter, trackpoint[0], trackpoint[1], trackpoint[3], date_time)
@@ -195,12 +203,12 @@ class Connection:
 
     def query_7(self):
         # 7: Find the total distance (in km) walked in 2008, by user with id=112.
-        # Hay que pasarlo a KM
         query = "SELECT lat, lon FROM TrackPoint as tp JOIN Activity as act WHERE tp.activity_id = act.id AND act.user_id = 112 AND YEAR(start_date_time) = 2008"
         start = time.perf_counter()
         self.cursor.execute(query)
         dist = 0
         last = None
+        # Sum all the distances using haversine
         for (lat, lon) in self.cursor:
             if last is not None:
                 dist += haversine((lat, lon), last, unit='km')
@@ -215,22 +223,23 @@ class Connection:
         #   - Tip: SUM (tp_n.altitude - tp_n-1.altitude), tp_n.altitude > tp_n-1.altitude
 
         # For this query, we first get all user ids and altitude from a join of TrackPoint and Activity, filtering invalid altitudes (marked as -777)
-        query = "SELECT tp.id, act.user_id, tp.altitude FROM TrackPoint as tp INNER JOIN Activity as act on tp.id = act.id WHERE tp.altitude != -777"
+        # We also filter change of altitude when changing activity
+        query = "SELECT tp.id, act.id, act.user_id, tp.altitude FROM TrackPoint as tp INNER JOIN Activity as act on tp.activity_id = act.id WHERE tp.altitude != -777"
         start = time.perf_counter()
         self.cursor.execute(query)
         last = None
         user_altitudes = {}
         # Now, we compute the substraction of consecutive pairs on all rows
-        for (id, user_id, altitude) in self.cursor:
-            if(last == None or last[1] != user_id or last[2] > altitude):
-                # First trackpoint OR change of user OR altitude difference negative
-                last = (id, user_id, altitude)
+        for (id, act_id, user_id, altitude) in self.cursor:
+            if(last == None or last[3] > altitude or last[1] != act_id or last[2] != user_id):
+                # First trackpoint OR change of user OR altitude difference negative OR change in activity / user
+                last = (id, act_id, user_id, altitude)
                 continue
             if(user_id not in user_altitudes):
-                user_altitudes[user_id] = altitude - last[2]
+                user_altitudes[user_id] = altitude - last[3]
             else:
-                user_altitudes[user_id] += altitude - last[2]
-            last = (id, user_id, altitude)
+                user_altitudes[user_id] += altitude - last[3]
+            last = (id, act_id, user_id, altitude)
         # And we sort by most feet gained
         user_altitudes =  dict(sorted(user_altitudes.items(), key=lambda item: item[1], reverse=1))
         stop = time.perf_counter()
@@ -345,22 +354,22 @@ class Connection:
 
 def main():
     try:
-        program = Connection()                           # Initialize database connection
-        #program.delete_tables()
+        program = Connection()                       # Initialize database connection
+        #program.delete_tables()                     # Delete all tables and data
         #program.create_tables()                     # Create database tables if they don't exist
         #program.insert_data('dataset')              # Parse dataset and insert data into tables
         # Execute the queries
-        program.query_1()
-        program.query_2()
-        program.query_3()
-        program.query_4()
-        program.query_5()
-        program.query_6()
-        program.query_7()
+        # program.query_1()
+        # program.query_2()
+        # program.query_3()
+        # program.query_4()
+        # program.query_5()
+        # program.query_6()
+        # program.query_7()
         program.query_8()
-        program.query_9()
-        program.query_10()
-        program.query_11()
+        # program.query_9()
+        # program.query_10()
+        # program.query_11()
 
 
     except Exception as e:
