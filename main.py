@@ -153,13 +153,26 @@ class Connection:
 
     def query_1(self):
         # 1: How many users, activities and trackpoints are there in the dataset (after it is inserted into the database).
-        query = "SELECT COUNT(id) as 'Total Users' FROM User;"
-        query2 = "SELECT COUNT(id) as 'Total Activities' FROM Activity;"
-        query3 = "SELECT COUNT(id) as 'Total Trackpoints' FROM TrackPoint;"
-        self.execute_and_print(query, "Query 1 - How many users are there in the dataset (after it is inserted into the database):")
-        self.execute_and_print(query2, "Query 1 - How many activities are there in the dataset (after it is inserted into the database):")
-        self.execute_and_print(query3, "Query 1 - How many trackpoints are there in the dataset (after it is inserted into the database):")
-
+        query1 = "SELECT COUNT(id) FROM User;"
+        query2 = "SELECT COUNT(id) FROM Activity;"
+        query3 = "SELECT COUNT(id) FROM TrackPoint;"
+        start = time.perf_counter()
+        self.cursor.execute(query1)
+        result1 = self.cursor.fetchall()
+        self.cursor.execute(query2)
+        result2 = self.cursor.fetchall()
+        self.cursor.execute(query3)
+        result3 = self.cursor.fetchall()
+        stop = time.perf_counter()
+        # Arrange into tabulate table
+        rows = [[result1[0][0], result2[0][0], result3[0][0]]]
+        print("Query 1 - How many users, trackpoints and activities are there in the dataset (after it is inserted into the database):\n")
+        print(tabulate(rows, headers=["Total Users", "Total Activities", "Total Trackpoints"], tablefmt = "simple"))
+        if len(rows) == 1:
+            print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
+        else:
+            print('\n{} rows in set ({:.2f} sec)\n'.format(len(rows), stop - start))
+        
     def query_2(self):
         # 2: Find the average number of activities per user.
         # We perform a subquery to get a table with the number of activities grouped by user, 
@@ -214,7 +227,13 @@ class Connection:
                 dist += haversine((lat, lon), last, unit='km')
             last = (lat, lon)
         stop = time.perf_counter()
-        print("Query 7 - Find the total distance (in km) walked in 2008, by user with id=112: {:.3f} km\n".format(dist))
+        rows = [[dist]]
+        print("Query 7 - Find the total distance (in km) walked in 2008, by user with id=112:\n")
+        print(tabulate(rows, headers=["Total Distance"], tablefmt = "simple"))
+        if len(rows) == 1:
+            print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
+        else:
+            print('\n{} rows in set ({:.2f} sec)\n'.format(len(rows), stop - start))
 
     def query_8(self):
         # 8: Find the top 20 users who have gained the most altitude meters.
@@ -287,14 +306,11 @@ class Connection:
 
         # Arrange as table
         rows = []
-        total = 0
         for entry in users_with_invalid_acts:
             row = []
             row.append(entry)
             row.append(users_with_invalid_acts[entry])
             rows.append(row)
-            total += users_with_invalid_acts[entry]
-        print(total)
         print("Query 9 - Find all users who have invalid activities, and the number of invalid activities per user:\n")
         print(tabulate(rows, headers=["User", "Number of invalid activities"], tablefmt = "simple"))
         if len(rows) == 1:
@@ -341,7 +357,7 @@ class Connection:
             rows.append(row)
         print(
             "Query 11 - Find all users who have registered transportation_mode and their most used transportation_mode:\n")
-        print(tabulate(rows, headers=["User", "Most used transportation mode"], tablefmt="pretty"))
+        print(tabulate(rows, headers=["User", "Most used transportation mode"], tablefmt="simple"))
         if len(rows) == 1:
             print('\n1 row in set ({:.2f} sec)\n'.format(stop - start))
         else:
